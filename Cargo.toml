@@ -1,0 +1,16 @@
+[package]
+name = "wgpu_perf_test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# GPU 통신 핵심
+wgpu = "24.0"
+# 윈도우 창 생성
+winit = { version = "0.30", features = ["rwh_06"] }
+# 비동기 실행 (wgpu 초기화용)
+pollster = "0.3"
+# CPU 데이터를 GPU용 바이트로 변환
+bytemuck = { version = "1.15", features = ["derive"] }
+# 수학 연산 (좌표 계산용)
+cgmath = "0.18"
