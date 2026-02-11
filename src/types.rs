@@ -9,10 +9,6 @@ pub const GRID_COLS: usize = 10;
 pub const GRID_SPACING_X: f32 = 0.7;
 pub const GRID_SPACING_Y: f32 = 0.5;
 
-// UI 버튼
-pub const ADD_BTN_Y: f32 = -0.88;
-pub const ADD_BTN_HALF: f32 = 0.025;
-
 // 카드 테두리 색상 팔레트
 pub const CARD_COLORS: [[f32; 3]; 6] = [
     [0.94, 0.33, 0.46], // 분홍

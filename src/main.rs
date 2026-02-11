@@ -1,9 +1,11 @@
 mod camera;
+mod egui_integration;
 mod input;
 mod pipeline;
 mod renderer;
 mod state;
 mod types;
+mod ui;
 
 use std::sync::Arc;
 use winit::{
@@ -29,8 +31,7 @@ impl ApplicationHandler for App {
         let window = Arc::new(
             event_loop
                 .create_window(
-                    winit::window::WindowAttributes::default()
-                        .with_title("Rust Canvas — Card View"),
+                    winit::window::WindowAttributes::default().with_title("Weaving — Canvas"),
                 )
                 .unwrap(),
         );
@@ -42,6 +43,12 @@ impl ApplicationHandler for App {
         let Some(state) = self.state.as_mut() else {
             return;
         };
+
+        // egui에 먼저 이벤트 전달
+        let _ = state
+            .egui
+            .winit_state
+            .on_window_event(&state.window, &event);
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
