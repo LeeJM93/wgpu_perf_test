@@ -1,0 +1,181 @@
+use std::sync::Arc;
+use wgpu::util::DeviceExt;
+use winit::window::Window;
+
+use crate::camera::Camera;
+use crate::pipeline;
+use crate::renderer;
+use crate::types::*;
+
+pub struct AppState {
+    pub surface: wgpu::Surface<'static>,
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub config: wgpu::SurfaceConfiguration,
+    pub window: Arc<Window>,
+
+    // 파이프라인
+    pub card_pipeline: wgpu::RenderPipeline,
+    pub line_pipeline: wgpu::RenderPipeline,
+    pub ui_pipeline: wgpu::RenderPipeline,
+
+    // 카메라
+    pub camera: Camera,
+    pub camera_buffer: wgpu::Buffer,
+    pub camera_bind_group: wgpu::BindGroup,
+
+    // 정적 버퍼 (초기화 시 한 번만 생성)
+    pub card_quad_buffer: wgpu::Buffer,
+    pub ui_vertex_buffer: wgpu::Buffer,
+    pub ui_vertex_count: u32,
+
+    // 데이터
+    pub block_positions: Vec<InstanceRaw>,
+    pub selected_idx: Option<usize>,
+    pub mouse_ndc: [f32; 2],
+
+    // 팬 상태
+    pub space_pressed: bool,
+    pub is_panning: bool,
+    pub pan_start_ndc: [f32; 2],
+    pub pan_start_camera: [f32; 2],
+}
+
+impl AppState {
+    pub fn new(window: Arc<Window>) -> Self {
+        let instance = wgpu::Instance::default();
+        let surface = instance.create_surface(Arc::clone(&window)).unwrap();
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+                .unwrap();
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
+                .unwrap();
+
+        let size = window.inner_size();
+        let config = surface
+            .get_default_config(&adapter, size.width, size.height)
+            .unwrap();
+        surface.configure(&device, &config);
+
+        // 카메라
+        let camera = Camera::new([3.15, 2.25], 0.3);
+        let aspect = config.width as f32 / config.height as f32;
+        let camera_uniform = camera.build_view_proj(aspect);
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Camera Buffer"),
+            contents: bytemuck::cast_slice(&[camera_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Camera Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Camera Bind Group"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Pipeline Layout"),
+            bind_group_layouts: &[&camera_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        // 파이프라인
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+        let card_pipeline =
+            pipeline::create_card_pipeline(&device, &shader, config.format, &pipeline_layout);
+        let line_pipeline =
+            pipeline::create_line_pipeline(&device, &shader, config.format, &pipeline_layout);
+        let ui_pipeline = pipeline::create_ui_pipeline(&device, &shader, config.format);
+
+        // 정적 버퍼: 카드 쿼드
+        let card_quad_buffer = Self::create_card_quad_buffer(&device);
+
+        // 정적 버퍼: UI
+        let ui_verts = renderer::build_ui_vertices();
+        let ui_vertex_count = ui_verts.len() as u32;
+        let ui_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("UI Vertex Buffer"),
+            contents: bytemuck::cast_slice(&ui_verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        // 블록 초기 데이터
+        let mut block_positions = Vec::new();
+        for i in 0..100 {
+            let col = (i % GRID_COLS) as f32;
+            let row = (i / GRID_COLS) as f32;
+            let color = CARD_COLORS[i % CARD_COLORS.len()];
+            block_positions.push(InstanceRaw {
+                position: [col * GRID_SPACING_X, row * GRID_SPACING_Y],
+                color,
+            });
+        }
+
+        Self {
+            surface,
+            device,
+            queue,
+            config,
+            window,
+            card_pipeline,
+            line_pipeline,
+            ui_pipeline,
+            camera,
+            camera_buffer,
+            camera_bind_group,
+            card_quad_buffer,
+            ui_vertex_buffer,
+            ui_vertex_count,
+            block_positions,
+            selected_idx: None,
+            mouse_ndc: [0.0, 0.0],
+            space_pressed: false,
+            is_panning: false,
+            pan_start_ndc: [0.0, 0.0],
+            pan_start_camera: [0.0, 0.0],
+        }
+    }
+
+    pub fn aspect(&self) -> f32 {
+        self.config.width as f32 / self.config.height as f32
+    }
+
+    pub fn update_camera_buffer(&self) {
+        let uniform = self.camera.build_view_proj(self.aspect());
+        self.queue
+            .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
+    }
+
+    fn create_card_quad_buffer(device: &wgpu::Device) -> wgpu::Buffer {
+        let vertices = [
+            Vertex { position: [-CARD_QUAD_W, CARD_QUAD_H], color: [0.0; 3] },
+            Vertex { position: [-CARD_QUAD_W, -CARD_QUAD_H], color: [0.0; 3] },
+            Vertex { position: [CARD_QUAD_W, CARD_QUAD_H], color: [0.0; 3] },
+            Vertex { position: [CARD_QUAD_W, -CARD_QUAD_H], color: [0.0; 3] },
+        ];
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Card Quad Buffer"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        })
+    }
+}

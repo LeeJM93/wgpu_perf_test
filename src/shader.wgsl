@@ -88,3 +88,19 @@ fn fs_card(in: VertexOutput) -> @location(0) vec4<f32> {
 fn fs_line(in: VertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(in.color, 1.0);
 }
+
+// UI 버텍스 셰이더 — 카메라 변환 없이 NDC 직접 출력
+@vertex
+fn vs_ui(model: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.clip_position = vec4<f32>(model.position, 0.0, 1.0);
+    out.color = model.color;
+    out.local_pos = vec2<f32>(0.0, 0.0);
+    return out;
+}
+
+// UI 프래그먼트 셰이더 — 단색 반투명 사각형
+@fragment
+fn fs_ui(in: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(in.color, 0.92);
+}
