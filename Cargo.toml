@@ -1,7 +1,7 @@
 [package]
 name = "wgpu_perf_test"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 # GPU 통신 핵심
@@ -14,3 +14,7 @@ pollster = "0.3"
 bytemuck = { version = "1.15", features = ["derive"] }
 # 수학 연산 (좌표 계산용)
 cgmath = "0.18"
+# GUI
+egui = "0.31"
+egui-wgpu = "0.31"
+egui-winit = "0.31"
