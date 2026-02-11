@@ -19,6 +19,7 @@ struct Vertex {
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceRaw {
     position: [f32; 2],
+    color: [f32; 3],
 }
 
 #[repr(C)]
@@ -26,6 +27,16 @@ struct InstanceRaw {
 struct CameraUniform {
     view_proj: [[f32; 4]; 4],
 }
+
+// 이미지에서 추출한 카드 테두리 색상 팔레트
+const CARD_COLORS: [[f32; 3]; 6] = [
+    [0.94, 0.33, 0.46], // 분홍 (기준)
+    [0.55, 0.48, 0.82], // 보라 (질문)
+    [0.95, 0.73, 0.15], // 노랑 (제안)
+    [0.30, 0.82, 0.88], // 시안 (정보)
+    [0.96, 0.58, 0.22], // 주황 (평가)
+    [0.25, 0.25, 0.30], // 다크 (결정)
+];
 
 struct Camera {
     position: [f32; 2],
@@ -54,7 +65,7 @@ struct AppState {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    render_pipeline: wgpu::RenderPipeline,
+    card_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
     window: Arc<Window>,
 
@@ -109,7 +120,7 @@ impl ApplicationHandler for App {
             event_loop
                 .create_window(
                     winit::window::WindowAttributes::default()
-                        .with_title("Rust 10k Blocks — Infinite Canvas"),
+                        .with_title("Rust Canvas — Card View"),
                 )
                 .unwrap(),
         );
@@ -128,10 +139,10 @@ impl ApplicationHandler for App {
             .unwrap();
         surface.configure(&device, &config);
 
-        // 카메라 초기화 — 격자 중앙에 위치, 전체가 보이도록 줌아웃
+        // 카메라 초기화
         let camera = Camera {
-            position: [7.5, 7.5],
-            zoom: 0.1,
+            position: [3.15, 2.25],
+            zoom: 0.3,
         };
         let aspect = config.width as f32 / config.height as f32;
         let camera_uniform = camera.build_view_proj(aspect);
@@ -173,13 +184,13 @@ impl ApplicationHandler for App {
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
-        // 1. 블록(사각형) 파이프라인
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Block Pipeline"),
+        // 카드 파이프라인 (vs_block + fs_card, 알파 블렌딩)
+        let card_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Card Pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_main"),
+                entry_point: Some("vs_block"),
                 buffers: &[
                     wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
@@ -189,17 +200,17 @@ impl ApplicationHandler for App {
                     wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
                         step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &wgpu::vertex_attr_array![2 => Float32x2],
+                        attributes: &wgpu::vertex_attr_array![2 => Float32x2, 3 => Float32x3],
                     },
                 ],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: Some("fs_card"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
@@ -214,7 +225,7 @@ impl ApplicationHandler for App {
             cache: None,
         });
 
-        // 2. 선(Line) 파이프라인
+        // 선 파이프라인 (vs_line + fs_line)
         let line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Line Pipeline"),
             layout: Some(&pipeline_layout),
@@ -230,10 +241,10 @@ impl ApplicationHandler for App {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: Some("fs_line"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
@@ -248,12 +259,16 @@ impl ApplicationHandler for App {
             cache: None,
         });
 
-        // 10,000개 블록 초기 위치 (world space 격자)
+        // 100개 블록 초기 위치 (10x10 격자, 카드 색상 순환)
         let mut block_positions = Vec::new();
         for i in 0..100 {
-            let x = (i % 100) as f32 * 0.15;
-            let y = (i / 100) as f32 * 0.15;
-            block_positions.push(InstanceRaw { position: [x, y] });
+            let col = (i % 10) as f32;
+            let row = (i / 10) as f32;
+            let color = CARD_COLORS[i % CARD_COLORS.len()];
+            block_positions.push(InstanceRaw {
+                position: [col * 0.7, row * 0.5],
+                color,
+            });
         }
 
         self.state = Some(AppState {
@@ -261,7 +276,7 @@ impl ApplicationHandler for App {
             device,
             queue,
             config,
-            render_pipeline,
+            card_pipeline,
             line_pipeline,
             window,
             camera,
@@ -285,7 +300,6 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
 
-            // Space 키 추적
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
@@ -309,7 +323,6 @@ impl ApplicationHandler for App {
                 ];
 
                 if state.is_panning {
-                    // NDC 차이를 world space 이동량으로 변환
                     let aspect = state.aspect();
                     let dx_ndc = state.mouse_ndc[0] - state.pan_start_ndc[0];
                     let dy_ndc = state.mouse_ndc[1] - state.pan_start_ndc[1];
@@ -333,18 +346,18 @@ impl ApplicationHandler for App {
             } => {
                 if button_state == ElementState::Pressed {
                     if state.space_pressed {
-                        // Space + 좌클릭 → 팬 시작
                         state.is_panning = true;
                         state.pan_start_ndc = state.mouse_ndc;
                         state.pan_start_camera = state.camera.position;
                     } else {
-                        // 블록 선택
+                        // 카드 히트 테스트 (사각형 범위)
                         let mouse_world = state.ndc_to_world(state.mouse_ndc);
-                        state.selected_idx = state.block_positions.iter().position(|pos| {
-                            let dx = pos.position[0] - mouse_world[0];
-                            let dy = pos.position[1] - mouse_world[1];
-                            (dx * dx + dy * dy).sqrt() < 0.05
-                        });
+                        state.selected_idx =
+                            state.block_positions.iter().position(|pos| {
+                                let dx = (pos.position[0] - mouse_world[0]).abs();
+                                let dy = (pos.position[1] - mouse_world[1]).abs();
+                                dx < 0.25 && dy < 0.15
+                            });
                     }
                 } else {
                     state.selected_idx = None;
@@ -352,7 +365,6 @@ impl ApplicationHandler for App {
                 }
             }
 
-            // 스크롤 줌 (마우스 위치 기준)
             WindowEvent::MouseWheel { delta, .. } => {
                 let scroll_y = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
@@ -360,18 +372,12 @@ impl ApplicationHandler for App {
                 };
 
                 let zoom_factor = if scroll_y > 0.0 { 1.1 } else { 1.0 / 1.1 };
-
-                // 줌 전 마우스 위치의 world 좌표
                 let world_before = state.ndc_to_world(state.mouse_ndc);
 
                 state.camera.zoom *= zoom_factor;
-                // 줌 범위 제한
                 state.camera.zoom = state.camera.zoom.clamp(0.001, 100.0);
 
-                // 줌 후 같은 NDC 위치의 world 좌표
                 let world_after = state.ndc_to_world(state.mouse_ndc);
-
-                // 마우스 아래 포인트가 고정되도록 카메라 위치 보정
                 state.camera.position[0] += world_before[0] - world_after[0];
                 state.camera.position[1] += world_before[1] - world_after[1];
 
@@ -400,24 +406,25 @@ impl ApplicationHandler for App {
                     .device
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-                // 블록 정점 데이터
-                let s = 0.03;
+                // 카드 쿼드 (그림자 여백 포함)
+                let cw: f32 = 0.28;
+                let ch: f32 = 0.18;
                 let block_shape = [
                     Vertex {
-                        position: [-s, s],
-                        color: [0.0, 0.8, 1.0],
+                        position: [-cw, ch],
+                        color: [0.0, 0.0, 0.0],
                     },
                     Vertex {
-                        position: [-s, -s],
-                        color: [0.0, 0.8, 1.0],
+                        position: [-cw, -ch],
+                        color: [0.0, 0.0, 0.0],
                     },
                     Vertex {
-                        position: [s, s],
-                        color: [0.0, 0.8, 1.0],
+                        position: [cw, ch],
+                        color: [0.0, 0.0, 0.0],
                     },
                     Vertex {
-                        position: [s, -s],
-                        color: [0.0, 0.8, 1.0],
+                        position: [cw, -ch],
+                        color: [0.0, 0.0, 0.0],
                     },
                 ];
                 let v_buf = state
@@ -435,16 +442,17 @@ impl ApplicationHandler for App {
                         usage: wgpu::BufferUsages::VERTEX,
                     });
 
-                // 선 데이터 생성
+                // 선 데이터 (블록 색상으로)
                 let mut line_verts = Vec::new();
                 for i in 0..state.block_positions.len() - 1 {
+                    let color = state.block_positions[i].color;
                     line_verts.push(Vertex {
                         position: state.block_positions[i].position,
-                        color: [1.0, 1.0, 1.0],
+                        color,
                     });
                     line_verts.push(Vertex {
                         position: state.block_positions[i + 1].position,
-                        color: [1.0, 1.0, 1.0],
+                        color,
                     });
                 }
                 let l_buf = state
@@ -462,7 +470,7 @@ impl ApplicationHandler for App {
                             view: &view,
                             resolve_target: None,
                             ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
                                 store: wgpu::StoreOp::Store,
                             },
                         })],
@@ -476,11 +484,11 @@ impl ApplicationHandler for App {
                     rpass.set_vertex_buffer(0, l_buf.slice(..));
                     rpass.draw(0..line_verts.len() as u32, 0..1);
 
-                    // 블록 그리기 (인스턴싱)
-                    rpass.set_pipeline(&state.render_pipeline);
+                    // 카드 그리기
+                    rpass.set_pipeline(&state.card_pipeline);
                     rpass.set_vertex_buffer(0, v_buf.slice(..));
                     rpass.set_vertex_buffer(1, i_buf.slice(..));
-                    rpass.draw(0..4, 0..100);
+                    rpass.draw(0..4, 0..state.block_positions.len() as u32);
                 }
                 state.queue.submit(std::iter::once(encoder.finish()));
                 output.present();
