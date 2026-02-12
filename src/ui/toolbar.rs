@@ -1,12 +1,11 @@
 use egui::{self, Color32, CornerRadius, RichText, Vec2};
 
+use crate::types::{TOOLBAR_BOTTOM_OFFSET, TOOLBAR_HALF_WIDTH};
+
 pub struct ToolbarAction {
     pub add_node: bool,
     pub add_batch: usize, // 0이면 미사용, 100/1000/10000
     pub reset: bool,
-    pub save: bool,
-    pub export: bool,
-    pub import: bool,
 }
 
 impl Default for ToolbarAction {
@@ -15,9 +14,6 @@ impl Default for ToolbarAction {
             add_node: false,
             add_batch: 0,
             reset: false,
-            save: false,
-            export: false,
-            import: false,
         }
     }
 }
@@ -25,11 +21,11 @@ impl Default for ToolbarAction {
 pub fn show(ctx: &egui::Context, canvas_rect: egui::Rect) -> ToolbarAction {
     let mut action = ToolbarAction::default();
 
-    let toolbar_y = canvas_rect.max.y - 55.0;
+    let toolbar_y = canvas_rect.max.y - TOOLBAR_BOTTOM_OFFSET;
     let toolbar_x = canvas_rect.center().x;
 
     egui::Area::new(egui::Id::new("toolbar"))
-        .fixed_pos(egui::pos2(toolbar_x - 380.0, toolbar_y))
+        .fixed_pos(egui::pos2(toolbar_x - TOOLBAR_HALF_WIDTH, toolbar_y))
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             let frame = egui::Frame::new()
@@ -79,20 +75,10 @@ pub fn show(ctx: &egui::Context, canvas_rect: egui::Rect) -> ToolbarAction {
                     separator(ui);
                     ui.add_space(4.0);
 
-                    // 저장
-                    if toolbar_button(ui, "💾", "저장").clicked() {
-                        action.save = true;
-                    }
-
-                    // 내보내기
-                    if toolbar_button(ui, "📤", "내보내기").clicked() {
-                        action.export = true;
-                    }
-
-                    // 가져오기
-                    if toolbar_button(ui, "📥", "가져오기").clicked() {
-                        action.import = true;
-                    }
+                    // 저장 / 내보내기 / 가져오기 (미구현)
+                    toolbar_button(ui, "💾", "저장");
+                    toolbar_button(ui, "📤", "내보내기");
+                    toolbar_button(ui, "📥", "가져오기");
 
                     ui.add_space(4.0);
                     separator(ui);

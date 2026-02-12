@@ -8,6 +8,15 @@ pub const CARD_QUAD_H: f32 = 0.18;
 pub const GRID_COLS: usize = 10;
 pub const GRID_SPACING_X: f32 = 0.7;
 pub const GRID_SPACING_Y: f32 = 0.5;
+pub const DEFAULT_GRID_COUNT: usize = 100;
+
+// UI 레이아웃
+pub const TOP_BAR_HEIGHT: f32 = 55.0;
+pub const LEFT_TAB_WIDTH: f32 = 75.0;
+pub const INSPECTOR_WIDTH: f32 = 351.0;
+pub const TOOLBAR_HALF_WIDTH: f32 = 380.0;
+pub const TOOLBAR_BOTTOM_OFFSET: f32 = 55.0;
+pub const AI_BUTTON_OFFSET: f32 = 60.0;
 
 // 카드 테두리 색상 팔레트
 pub const CARD_COLORS: [[f32; 3]; 6] = [
@@ -18,6 +27,19 @@ pub const CARD_COLORS: [[f32; 3]; 6] = [
     [0.96, 0.58, 0.22], // 주황
     [0.25, 0.25, 0.30], // 다크
 ];
+
+pub fn create_default_grid() -> Vec<InstanceRaw> {
+    (0..DEFAULT_GRID_COUNT)
+        .map(|i| {
+            let col = (i % GRID_COLS) as f32;
+            let row = (i / GRID_COLS) as f32;
+            InstanceRaw {
+                position: [col * GRID_SPACING_X, row * GRID_SPACING_Y],
+                color: CARD_COLORS[i % CARD_COLORS.len()],
+            }
+        })
+        .collect()
+}
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]

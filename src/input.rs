@@ -2,7 +2,7 @@ use winit::dpi::PhysicalSize;
 use winit::event::MouseScrollDelta;
 use winit::keyboard::KeyCode;
 
-use crate::state::AppState;
+use crate::state::{AppState, InteractionMode};
 use crate::types::*;
 
 impl AppState {
@@ -21,7 +21,9 @@ impl AppState {
         if key == KeyCode::Space {
             self.space_pressed = pressed;
             if !pressed {
-                self.is_panning = false;
+                if matches!(self.interaction, InteractionMode::Panning { .. }) {
+                    self.interaction = InteractionMode::Idle;
+                }
             }
         }
     }
@@ -39,7 +41,8 @@ impl AppState {
             && y as f32 >= canvas.min.y
             && y as f32 <= canvas.max.y;
 
-        if !in_canvas && !self.is_panning && !self.is_moving_selection && !self.is_drag_selecting {
+        let is_active = !matches!(self.interaction, InteractionMode::Idle);
+        if !in_canvas && !is_active {
             return;
         }
 
@@ -48,31 +51,43 @@ impl AppState {
             ((y as f32 - canvas.min.y) / canvas.height()) * -2.0 + 1.0,
         ];
 
-        if self.is_panning {
-            let aspect = self.canvas_aspect();
-            let dx_ndc = self.mouse_ndc[0] - self.pan_start_ndc[0];
-            let dy_ndc = self.mouse_ndc[1] - self.pan_start_ndc[1];
-            self.camera.position[0] = self.pan_start_camera[0] - dx_ndc * aspect / self.camera.zoom;
-            self.camera.position[1] = self.pan_start_camera[1] - dy_ndc / self.camera.zoom;
-            self.update_camera_buffer();
-            self.window.request_redraw();
-        } else if self.is_drag_selecting {
-            let world = self.camera.ndc_to_world(self.mouse_ndc, self.canvas_aspect());
-            self.drag_select_end = world;
-            self.window.request_redraw();
-        } else if self.is_moving_selection {
-            let world = self.camera.ndc_to_world(self.mouse_ndc, self.canvas_aspect());
-            let dx = world[0] - self.move_last_world[0];
-            let dy = world[1] - self.move_last_world[1];
-            for &idx in &self.selected_indices {
-                if idx < self.block_positions.len() {
-                    self.block_positions[idx].position[0] += dx;
-                    self.block_positions[idx].position[1] += dy;
-                }
+        match &self.interaction {
+            InteractionMode::Panning {
+                start_ndc,
+                start_camera,
+            } => {
+                let aspect = self.canvas_aspect();
+                let dx_ndc = self.mouse_ndc[0] - start_ndc[0];
+                let dy_ndc = self.mouse_ndc[1] - start_ndc[1];
+                self.camera.position[0] = start_camera[0] - dx_ndc * aspect / self.camera.zoom;
+                self.camera.position[1] = start_camera[1] - dy_ndc / self.camera.zoom;
+                self.update_camera_buffer();
+                self.window.request_redraw();
             }
-            self.move_last_world = world;
-            self.mark_positions_dirty();
-            self.window.request_redraw();
+            InteractionMode::DragSelecting { start, .. } => {
+                let world = self.camera.ndc_to_world(self.mouse_ndc, self.canvas_aspect());
+                let start = *start;
+                self.interaction = InteractionMode::DragSelecting {
+                    start,
+                    end: world,
+                };
+                self.window.request_redraw();
+            }
+            InteractionMode::MovingSelection { last_world } => {
+                let world = self.camera.ndc_to_world(self.mouse_ndc, self.canvas_aspect());
+                let dx = world[0] - last_world[0];
+                let dy = world[1] - last_world[1];
+                for &idx in &self.selected_indices {
+                    if idx < self.block_positions.len() {
+                        self.block_positions[idx].position[0] += dx;
+                        self.block_positions[idx].position[1] += dy;
+                    }
+                }
+                self.interaction = InteractionMode::MovingSelection { last_world: world };
+                self.mark_positions_dirty();
+                self.window.request_redraw();
+            }
+            InteractionMode::Idle => {}
         }
     }
 
@@ -83,9 +98,10 @@ impl AppState {
 
         if pressed {
             if self.space_pressed {
-                self.is_panning = true;
-                self.pan_start_ndc = self.mouse_ndc;
-                self.pan_start_camera = self.camera.position;
+                self.interaction = InteractionMode::Panning {
+                    start_ndc: self.mouse_ndc,
+                    start_camera: self.camera.position,
+                };
             } else {
                 let mouse_world = self.camera.ndc_to_world(self.mouse_ndc, self.canvas_aspect());
 
@@ -97,34 +113,31 @@ impl AppState {
                 });
 
                 if let Some(idx) = clicked_node {
-                    if self.selected_indices.contains(&idx) {
-                        // 이미 선택된 노드 위 클릭 → 그룹 이동 시작
-                        self.is_moving_selection = true;
-                        self.move_last_world = mouse_world;
-                    } else {
-                        // 비선택 노드 클릭 → 해당 노드만 선택 후 이동 시작
+                    if !self.selected_indices.contains(&idx) {
                         self.selected_indices.clear();
                         self.selected_indices.push(idx);
-                        self.is_moving_selection = true;
-                        self.move_last_world = mouse_world;
                     }
+                    self.interaction = InteractionMode::MovingSelection {
+                        last_world: mouse_world,
+                    };
                 } else {
                     // 빈 공간 클릭 → 드래그 선택 시작
                     self.selected_indices.clear();
-                    self.is_drag_selecting = true;
-                    self.drag_select_start = mouse_world;
-                    self.drag_select_end = mouse_world;
+                    self.interaction = InteractionMode::DragSelecting {
+                        start: mouse_world,
+                        end: mouse_world,
+                    };
                 }
 
                 self.window.request_redraw();
             }
         } else {
-            if self.is_drag_selecting {
+            if let InteractionMode::DragSelecting { start, end } = &self.interaction {
                 // 드래그 선택 완료 → 사각형 안의 노드 전부 선택
-                let min_x = self.drag_select_start[0].min(self.drag_select_end[0]);
-                let max_x = self.drag_select_start[0].max(self.drag_select_end[0]);
-                let min_y = self.drag_select_start[1].min(self.drag_select_end[1]);
-                let max_y = self.drag_select_start[1].max(self.drag_select_end[1]);
+                let min_x = start[0].min(end[0]);
+                let max_x = start[0].max(end[0]);
+                let min_y = start[1].min(end[1]);
+                let max_y = start[1].max(end[1]);
 
                 self.selected_indices.clear();
                 for (i, pos) in self.block_positions.iter().enumerate() {
@@ -133,13 +146,10 @@ impl AppState {
                         self.selected_indices.push(i);
                     }
                 }
-
-                self.is_drag_selecting = false;
                 self.window.request_redraw();
             }
 
-            self.is_moving_selection = false;
-            self.is_panning = false;
+            self.interaction = InteractionMode::Idle;
         }
     }
 

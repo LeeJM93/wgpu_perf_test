@@ -1,10 +1,12 @@
 use egui::{self, Color32, Vec2};
 
+use crate::types::AI_BUTTON_OFFSET;
+
 pub fn show(ctx: &egui::Context, canvas_rect: egui::Rect) -> bool {
     let mut clicked = false;
 
-    let btn_x = canvas_rect.max.x - 60.0;
-    let btn_y = canvas_rect.max.y - 60.0;
+    let btn_x = canvas_rect.max.x - AI_BUTTON_OFFSET;
+    let btn_y = canvas_rect.max.y - AI_BUTTON_OFFSET;
 
     egui::Area::new(egui::Id::new("ai_button"))
         .fixed_pos(egui::pos2(btn_x, btn_y))

@@ -15,6 +15,12 @@ struct TabButton {
     label: &'static str,
 }
 
+pub fn frame() -> egui::Frame {
+    egui::Frame::new()
+        .fill(Color32::TRANSPARENT)
+        .inner_margin(egui::Margin::ZERO)
+}
+
 pub fn show(ui: &mut egui::Ui, state: &mut LeftTabState) {
     ui.vertical_centered(|ui| {
         ui.add_space(50.0);
@@ -55,9 +61,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut LeftTabState) {
         for (i, btn) in section1.iter().enumerate() {
             let is_active = state.active_section == i;
             show_tab_button(ui, btn, is_active);
-            if ui.ctx().input(|i| i.pointer.any_click()) {
-                // 클릭 처리는 show_tab_button 내부 response로
-            }
             ui.add_space(12.0);
         }
 
@@ -93,13 +96,14 @@ pub fn show(ui: &mut egui::Ui, state: &mut LeftTabState) {
     });
 }
 
-fn show_tab_button(ui: &mut egui::Ui, btn: &TabButton, _is_active: bool) {
+fn show_tab_button(ui: &mut egui::Ui, btn: &TabButton, is_active: bool) {
+    let text_color = if is_active {
+        Color32::from_rgb(79, 57, 246)
+    } else {
+        Color32::from_rgb(82, 82, 82)
+    };
     ui.vertical_centered(|ui| {
         ui.label(RichText::new(btn.icon).size(15.0));
-        ui.label(
-            RichText::new(btn.label)
-                .size(10.0)
-                .color(Color32::from_rgb(82, 82, 82)),
-        );
+        ui.label(RichText::new(btn.label).size(10.0).color(text_color));
     });
 }

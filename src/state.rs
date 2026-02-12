@@ -8,6 +8,21 @@ use crate::pipeline;
 use crate::types::*;
 use crate::ui;
 
+pub enum InteractionMode {
+    Idle,
+    Panning {
+        start_ndc: [f32; 2],
+        start_camera: [f32; 2],
+    },
+    DragSelecting {
+        start: [f32; 2],
+        end: [f32; 2],
+    },
+    MovingSelection {
+        last_world: [f32; 2],
+    },
+}
+
 pub struct AppState {
     pub surface: wgpu::Surface<'static>,
     pub device: wgpu::Device,
@@ -43,17 +58,10 @@ pub struct AppState {
 
     // 선택 상태
     pub selected_indices: Vec<usize>,
-    pub is_drag_selecting: bool,
-    pub drag_select_start: [f32; 2],
-    pub drag_select_end: [f32; 2],
-    pub is_moving_selection: bool,
-    pub move_last_world: [f32; 2],
 
-    // 팬 상태
+    // 상호작용 모드
+    pub interaction: InteractionMode,
     pub space_pressed: bool,
-    pub is_panning: bool,
-    pub pan_start_ndc: [f32; 2],
-    pub pan_start_camera: [f32; 2],
 
     // egui
     pub egui: EguiIntegration,
@@ -135,16 +143,7 @@ impl AppState {
         let egui = EguiIntegration::new(&device, config.format, &window);
 
         // 블록 초기 데이터
-        let mut block_positions = Vec::new();
-        for i in 0..100 {
-            let col = (i % GRID_COLS) as f32;
-            let row = (i / GRID_COLS) as f32;
-            let color = CARD_COLORS[i % CARD_COLORS.len()];
-            block_positions.push(InstanceRaw {
-                position: [col * GRID_SPACING_X, row * GRID_SPACING_Y],
-                color,
-            });
-        }
+        let block_positions = create_default_grid();
 
         // 영속 GPU 버퍼 사전 할당
         let initial_capacity = block_positions.len().max(1024) * 2;
@@ -185,15 +184,8 @@ impl AppState {
             mouse_ndc: [0.0, 0.0],
             mouse_pixel: [0.0, 0.0],
             selected_indices: Vec::new(),
-            is_drag_selecting: false,
-            drag_select_start: [0.0, 0.0],
-            drag_select_end: [0.0, 0.0],
-            is_moving_selection: false,
-            move_last_world: [0.0, 0.0],
+            interaction: InteractionMode::Idle,
             space_pressed: false,
-            is_panning: false,
-            pan_start_ndc: [0.0, 0.0],
-            pan_start_camera: [0.0, 0.0],
             egui,
             top_bar_state: Default::default(),
             left_tab_state: Default::default(),

@@ -18,6 +18,16 @@ impl Default for TopBarState {
     }
 }
 
+pub fn frame() -> egui::Frame {
+    egui::Frame::new()
+        .fill(Color32::from_rgba_premultiplied(244, 244, 244, 210))
+        .stroke(egui::Stroke::new(
+            0.5,
+            Color32::from_rgba_premultiplied(0, 0, 0, 50),
+        ))
+        .inner_margin(egui::Margin::ZERO)
+}
+
 pub fn show(ui: &mut egui::Ui, state: &mut TopBarState) {
     ui.horizontal_centered(|ui| {
         ui.add_space(100.0); // macOS traffic lights 영역

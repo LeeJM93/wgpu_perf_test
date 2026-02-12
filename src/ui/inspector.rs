@@ -22,6 +22,16 @@ struct TranscriptEntry {
     badge_text: Color32,
 }
 
+pub fn frame() -> egui::Frame {
+    egui::Frame::new()
+        .fill(Color32::from_rgb(252, 252, 252))
+        .stroke(egui::Stroke::new(
+            1.0,
+            Color32::from_rgba_premultiplied(0, 0, 0, 38),
+        ))
+        .inner_margin(egui::Margin::ZERO)
+}
+
 pub fn show(ui: &mut egui::Ui, state: &mut InspectorState) {
     // 탭 바
     ui.horizontal(|ui| {
