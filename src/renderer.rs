@@ -27,6 +27,10 @@ impl AppState {
         let mut inspector_state = std::mem::take(&mut self.inspector_state);
         let mut block_positions_clone = self.block_positions.clone();
         let camera_position = self.camera.position;
+        let camera_zoom = self.camera.zoom;
+        let is_drag_selecting = self.is_drag_selecting;
+        let drag_select_start = self.drag_select_start;
+        let drag_select_end = self.drag_select_end;
 
         let full_output = ctx.run(raw_input, |ctx| {
             // TopBar (55px)
@@ -122,6 +126,48 @@ impl AppState {
                                 color,
                             });
                         }
+                    }
+
+                    // 드래그 선택 사각형
+                    if is_drag_selecting {
+                        let aspect = if canvas_rect.width() > 0.0 && canvas_rect.height() > 0.0 {
+                            canvas_rect.width() / canvas_rect.height()
+                        } else {
+                            1.0
+                        };
+
+                        let ndc_to_screen = |ndc: [f32; 2]| -> egui::Pos2 {
+                            egui::pos2(
+                                canvas_rect.min.x + (ndc[0] + 1.0) * 0.5 * canvas_rect.width(),
+                                canvas_rect.min.y + (-ndc[1] + 1.0) * 0.5 * canvas_rect.height(),
+                            )
+                        };
+
+                        let ndc_start = [
+                            (drag_select_start[0] - camera_position[0]) * camera_zoom / aspect,
+                            (drag_select_start[1] - camera_position[1]) * camera_zoom,
+                        ];
+                        let ndc_end = [
+                            (drag_select_end[0] - camera_position[0]) * camera_zoom / aspect,
+                            (drag_select_end[1] - camera_position[1]) * camera_zoom,
+                        ];
+
+                        let p1 = ndc_to_screen(ndc_start);
+                        let p2 = ndc_to_screen(ndc_end);
+
+                        let select_rect = egui::Rect::from_two_pos(p1, p2);
+                        let painter = ui.painter();
+                        painter.rect_filled(
+                            select_rect,
+                            0.0,
+                            egui::Color32::from_rgba_premultiplied(59, 130, 246, 30),
+                        );
+                        painter.rect_stroke(
+                            select_rect,
+                            egui::CornerRadius::ZERO,
+                            egui::Stroke::new(1.5, egui::Color32::from_rgb(59, 130, 246)),
+                            egui::StrokeKind::Outside,
+                        );
                     }
 
                     // AI 버튼

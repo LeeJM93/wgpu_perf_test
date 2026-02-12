@@ -32,6 +32,13 @@ impl Camera {
         ]
     }
 
+    pub fn world_to_ndc(&self, world: [f32; 2], aspect: f32) -> [f32; 2] {
+        [
+            (world[0] - self.position[0]) * self.zoom / aspect,
+            (world[1] - self.position[1]) * self.zoom,
+        ]
+    }
+
     pub fn zoom_at(&mut self, ndc: [f32; 2], factor: f32, aspect: f32) {
         let world_before = self.ndc_to_world(ndc, aspect);
         self.zoom = (self.zoom * factor).clamp(0.001, 100.0);

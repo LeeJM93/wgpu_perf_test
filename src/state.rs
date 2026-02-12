@@ -29,9 +29,16 @@ pub struct AppState {
 
     // 데이터
     pub block_positions: Vec<InstanceRaw>,
-    pub selected_idx: Option<usize>,
     pub mouse_ndc: [f32; 2],
     pub mouse_pixel: [f32; 2],
+
+    // 선택 상태
+    pub selected_indices: Vec<usize>,
+    pub is_drag_selecting: bool,
+    pub drag_select_start: [f32; 2],
+    pub drag_select_end: [f32; 2],
+    pub is_moving_selection: bool,
+    pub move_last_world: [f32; 2],
 
     // 팬 상태
     pub space_pressed: bool,
@@ -143,9 +150,14 @@ impl AppState {
             camera_bind_group,
             card_quad_buffer,
             block_positions,
-            selected_idx: None,
             mouse_ndc: [0.0, 0.0],
             mouse_pixel: [0.0, 0.0],
+            selected_indices: Vec::new(),
+            is_drag_selecting: false,
+            drag_select_start: [0.0, 0.0],
+            drag_select_end: [0.0, 0.0],
+            is_moving_selection: false,
+            move_last_world: [0.0, 0.0],
             space_pressed: false,
             is_panning: false,
             pan_start_ndc: [0.0, 0.0],
