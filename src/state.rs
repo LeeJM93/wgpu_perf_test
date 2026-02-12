@@ -27,6 +27,15 @@ pub struct AppState {
     // 정적 버퍼 (초기화 시 한 번만 생성)
     pub card_quad_buffer: wgpu::Buffer,
 
+    // 영속 GPU 버퍼
+    pub instance_buffer: wgpu::Buffer,
+    pub instance_buffer_capacity: usize,
+    pub line_buffer: wgpu::Buffer,
+    pub line_buffer_capacity: usize,
+    pub line_vertex_count: u32,
+    pub positions_dirty: bool,
+    pub cached_line_verts: Vec<Vertex>,
+
     // 데이터
     pub block_positions: Vec<InstanceRaw>,
     pub mouse_ndc: [f32; 2],
@@ -137,6 +146,22 @@ impl AppState {
             });
         }
 
+        // 영속 GPU 버퍼 사전 할당
+        let initial_capacity = block_positions.len().max(1024) * 2;
+        let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Instance Buffer"),
+            size: (initial_capacity * std::mem::size_of::<InstanceRaw>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let line_capacity = initial_capacity * 2;
+        let line_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Line Buffer"),
+            size: (line_capacity * std::mem::size_of::<Vertex>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         Self {
             surface,
             device,
@@ -149,6 +174,13 @@ impl AppState {
             camera_buffer,
             camera_bind_group,
             card_quad_buffer,
+            instance_buffer,
+            instance_buffer_capacity: initial_capacity,
+            line_buffer,
+            line_buffer_capacity: line_capacity,
+            line_vertex_count: 0,
+            positions_dirty: true,
+            cached_line_verts: Vec::new(),
             block_positions,
             mouse_ndc: [0.0, 0.0],
             mouse_pixel: [0.0, 0.0],
@@ -175,6 +207,70 @@ impl AppState {
             rect.width() / rect.height()
         } else {
             self.config.width as f32 / self.config.height as f32
+        }
+    }
+
+    pub fn mark_positions_dirty(&mut self) {
+        self.positions_dirty = true;
+    }
+
+    pub fn update_gpu_buffers(&mut self) {
+        if !self.positions_dirty {
+            return;
+        }
+        self.positions_dirty = false;
+
+        // 용량 부족 시 버퍼 재할당 (2배 확장)
+        let needed = self.block_positions.len();
+        if needed > self.instance_buffer_capacity {
+            let new_cap = (needed * 2).max(1024);
+            self.instance_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Instance Buffer"),
+                size: (new_cap * std::mem::size_of::<InstanceRaw>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.instance_buffer_capacity = new_cap;
+
+            let line_cap = new_cap * 2;
+            self.line_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Line Buffer"),
+                size: (line_cap * std::mem::size_of::<Vertex>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.line_buffer_capacity = line_cap;
+        }
+
+        // 라인 버텍스 캐시 재생성
+        self.cached_line_verts.clear();
+        for i in 0..self.block_positions.len().saturating_sub(1) {
+            let color = self.block_positions[i].color;
+            self.cached_line_verts.push(Vertex {
+                position: self.block_positions[i].position,
+                color,
+            });
+            self.cached_line_verts.push(Vertex {
+                position: self.block_positions[i + 1].position,
+                color,
+            });
+        }
+        self.line_vertex_count = self.cached_line_verts.len() as u32;
+
+        // GPU에 업로드
+        if !self.block_positions.is_empty() {
+            self.queue.write_buffer(
+                &self.instance_buffer,
+                0,
+                bytemuck::cast_slice(&self.block_positions),
+            );
+        }
+        if !self.cached_line_verts.is_empty() {
+            self.queue.write_buffer(
+                &self.line_buffer,
+                0,
+                bytemuck::cast_slice(&self.cached_line_verts),
+            );
         }
     }
 

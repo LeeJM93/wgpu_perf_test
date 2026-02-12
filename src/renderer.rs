@@ -1,5 +1,3 @@
-use wgpu::util::DeviceExt;
-
 use crate::state::AppState;
 use crate::types::*;
 use crate::ui;
@@ -25,12 +23,12 @@ impl AppState {
         let mut top_bar_state = std::mem::take(&mut self.top_bar_state);
         let mut left_tab_state = std::mem::take(&mut self.left_tab_state);
         let mut inspector_state = std::mem::take(&mut self.inspector_state);
-        let mut block_positions_clone = self.block_positions.clone();
         let camera_position = self.camera.position;
         let camera_zoom = self.camera.zoom;
         let is_drag_selecting = self.is_drag_selecting;
         let drag_select_start = self.drag_select_start;
         let drag_select_end = self.drag_select_end;
+        let mut toolbar_action = ui::toolbar::ToolbarAction::default();
 
         let full_output = ctx.run(raw_input, |ctx| {
             // TopBar (55px)
@@ -87,46 +85,8 @@ impl AppState {
                 .show(ctx, |ui| {
                     canvas_rect = ui.available_rect_before_wrap();
 
-                    // 플로팅 툴바
-                    let action = ui::toolbar::show(ctx, canvas_rect);
-
-                    if action.add_node {
-                        let color = CARD_COLORS[block_positions_clone.len() % CARD_COLORS.len()];
-                        block_positions_clone.push(InstanceRaw {
-                            position: camera_position,
-                            color,
-                        });
-                    }
-
-                    if action.add_batch > 0 {
-                        let start = block_positions_clone.len();
-                        let cols = (action.add_batch as f32).sqrt().ceil() as usize;
-                        for i in 0..action.add_batch {
-                            let col = (i % cols) as f32;
-                            let row = (i / cols) as f32;
-                            let color = CARD_COLORS[(start + i) % CARD_COLORS.len()];
-                            block_positions_clone.push(InstanceRaw {
-                                position: [
-                                    camera_position[0] + col * GRID_SPACING_X,
-                                    camera_position[1] + row * GRID_SPACING_Y,
-                                ],
-                                color,
-                            });
-                        }
-                    }
-
-                    if action.reset {
-                        block_positions_clone.clear();
-                        for i in 0..100 {
-                            let col = (i % GRID_COLS) as f32;
-                            let row = (i / GRID_COLS) as f32;
-                            let color = CARD_COLORS[i % CARD_COLORS.len()];
-                            block_positions_clone.push(InstanceRaw {
-                                position: [col * GRID_SPACING_X, row * GRID_SPACING_Y],
-                                color,
-                            });
-                        }
-                    }
+                    // 플로팅 툴바 (액션은 클로저 밖에서 처리)
+                    toolbar_action = ui::toolbar::show(ctx, canvas_rect);
 
                     // 드래그 선택 사각형
                     if is_drag_selecting {
@@ -181,9 +141,46 @@ impl AppState {
         self.left_tab_state = left_tab_state;
         self.inspector_state = inspector_state;
 
-        // block_positions가 변경되었으면 업데이트
-        if block_positions_clone.len() != self.block_positions.len() {
-            self.block_positions = block_positions_clone;
+        // 툴바 액션 처리 (clone 없이 직접 수정)
+        if toolbar_action.add_node {
+            let color = CARD_COLORS[self.block_positions.len() % CARD_COLORS.len()];
+            self.block_positions.push(InstanceRaw {
+                position: self.camera.position,
+                color,
+            });
+            self.positions_dirty = true;
+        }
+
+        if toolbar_action.add_batch > 0 {
+            let start = self.block_positions.len();
+            let cols = (toolbar_action.add_batch as f32).sqrt().ceil() as usize;
+            for i in 0..toolbar_action.add_batch {
+                let col = (i % cols) as f32;
+                let row = (i / cols) as f32;
+                let color = CARD_COLORS[(start + i) % CARD_COLORS.len()];
+                self.block_positions.push(InstanceRaw {
+                    position: [
+                        self.camera.position[0] + col * GRID_SPACING_X,
+                        self.camera.position[1] + row * GRID_SPACING_Y,
+                    ],
+                    color,
+                });
+            }
+            self.positions_dirty = true;
+        }
+
+        if toolbar_action.reset {
+            self.block_positions.clear();
+            for i in 0..100 {
+                let col = (i % GRID_COLS) as f32;
+                let row = (i / GRID_COLS) as f32;
+                let color = CARD_COLORS[i % CARD_COLORS.len()];
+                self.block_positions.push(InstanceRaw {
+                    position: [col * GRID_SPACING_X, row * GRID_SPACING_Y],
+                    color,
+                });
+            }
+            self.positions_dirty = true;
         }
 
         self.egui
@@ -213,37 +210,12 @@ impl AppState {
             &screen_descriptor,
         );
 
+        // ===== GPU 버퍼 업데이트 (dirty일 때만) =====
+        self.update_gpu_buffers();
+
         // ===== wgpu 캔버스 렌더 (viewport/scissor 제한) =====
         let canvas = self.egui.canvas_rect;
         let scale = self.window.scale_factor() as f32;
-
-        let instance_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(&self.block_positions),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-
-        let mut line_verts = Vec::new();
-        for i in 0..self.block_positions.len().saturating_sub(1) {
-            let color = self.block_positions[i].color;
-            line_verts.push(Vertex {
-                position: self.block_positions[i].position,
-                color,
-            });
-            line_verts.push(Vertex {
-                position: self.block_positions[i + 1].position,
-                color,
-            });
-        }
-        let line_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(&line_verts),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -274,13 +246,13 @@ impl AppState {
 
             // 선
             rpass.set_pipeline(&self.line_pipeline);
-            rpass.set_vertex_buffer(0, line_buffer.slice(..));
-            rpass.draw(0..line_verts.len() as u32, 0..1);
+            rpass.set_vertex_buffer(0, self.line_buffer.slice(..));
+            rpass.draw(0..self.line_vertex_count, 0..1);
 
             // 카드
             rpass.set_pipeline(&self.card_pipeline);
             rpass.set_vertex_buffer(0, self.card_quad_buffer.slice(..));
-            rpass.set_vertex_buffer(1, instance_buffer.slice(..));
+            rpass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             rpass.draw(0..4, 0..self.block_positions.len() as u32);
         }
 
@@ -314,7 +286,13 @@ impl AppState {
 
         output.present();
 
-        // 매 프레임 다시 그리기 요청
-        self.window.request_redraw();
+        // egui가 재렌더를 요청할 때만 다시 그리기
+        let needs_repaint = full_output
+            .viewport_output
+            .values()
+            .any(|v| v.repaint_delay.is_zero());
+        if needs_repaint {
+            self.window.request_redraw();
+        }
     }
 }

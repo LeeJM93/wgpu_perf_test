@@ -71,6 +71,7 @@ impl AppState {
                 }
             }
             self.move_last_world = world;
+            self.mark_positions_dirty();
             self.window.request_redraw();
         }
     }
